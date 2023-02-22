@@ -23,7 +23,7 @@ sleep_once() {
 }
 
 hostpci_ids() {
-  grep '^hostpci[0-9]:.*0000' "/etc/pve/qemu-server/$VMID.conf" | awk '{print $2}' | awk -F, '{print $1}'
+  grep '^hostpci[0-9]:.*' "/etc/pve/qemu-server/$VMID.conf" | awk '{print $2}' | awk -F, '{print $1}'
 }
 
 exec_pci_rescan() {
