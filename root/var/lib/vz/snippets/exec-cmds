@@ -15,6 +15,33 @@ if_action() {
   fi
 }
 
+# With a given list of ranges of CPU cores (ie. 0-15 or 1,2) and a VM core
+# number, get a deterministic CPU core from the list. This allows exact
+# replication of host topology onto a guest, instead of an affinity range.
+# usage: get_affinity_core LIST CORE
+# example with 1,3-7,9,11-15: CORE 0 = 1, 2 = 4, 11 = 15, 12 = 1
+get_affinity_core() {
+  cpulist=$1
+  corenum=$2
+
+  until [ $corenum -lt 0 ]; do
+    for i in ${cpulist//,/ }; do
+      nums=( ${i//-/ } )
+      min=( ${nums[0]}  )
+      max=( ${nums[1]:-$min} )
+
+      for cpucore in $(seq $min $max); do
+        if [ $corenum -eq 0 ]; then
+          echo "$cpucore"
+          return
+        fi
+
+        ((corenum=corenum-1))
+      done
+    done
+  done
+}
+
 sleep_once() {
   if [[ -z "$SLEPT" ]]; then
     sleep 1s
@@ -46,19 +73,22 @@ exec_assign_interrupts() {
   echo "Wating $SLEEP seconds for all vfio-gpu interrupts to show up..."
   sleep "$SLEEP"
 
-  MASK="$1"
+  CPULIST="$1"
   shift
 
   if [[ "$1" == "--all" ]]; then
     set -- $(hostpci_ids)
   fi
 
+  count=0
   for interrupt; do
     interrupt=$(printf '%b' "${interrupt//%/\\x}")
-    echo "Moving $interrupt interrupts to $MASK cpu cores $VMID..."
+    ((count=count+1))
+    MASK=$(get_affinity_core "$CPULIST" "$count")
+    echo "Moving VM $VMID interrupt $interrupt to core #$MASK..."
     grep "$interrupt" /proc/interrupts | cut -d ":" -f 1 | while read -r i; do
       echo "- IRQ: $(grep "^\s*$i:" /proc/interrupts)"
-      echo "$MASK" > /proc/irq/$i/smp_affinity_list
+      #echo "$MASK" > /proc/irq/$i/smp_affinity_list
     done
   done
 }
@@ -86,8 +116,21 @@ exec_pci_unbind() {
 exec_cpu_taskset() {
   sleep_once
 
+  # Set general affinity on the parent kvm process
   echo "Running taskset with $1 for $(vmpid)..."
   taskset -a -p -c "$1" "$(vmpid)"
+
+  # Isolate each guest core to a specific host core
+  for line in $( ps -o spid,cpuid,comm -T -p $(vmpid) | grep " CPU " | awk '{print $1 "/" $4}' ); do
+      info=( ${line//\// } )
+      cpupid=( ${info[0]} )
+      coreid=( ${info[1]} )
+      hostcore=$(get_affinity_core "$1" "$coreid")
+
+      echo "Running taskset with $hostcore for core #$coreid on $cpupid"
+      taskset -p --cpu-list $hostcore $cpupid
+  done
+
   echo ""
 }
 
