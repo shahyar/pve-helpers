@@ -58,8 +58,13 @@ exec_pci_rescan() {
   echo 1 > /sys/bus/pci/rescan
 }
 
-exec_set_haltpoll() {
-  echo "Setting haltpoll for $VMID..."
+exec_set_guest_halt_poll() {
+  echo "Setting guest_halt_poll globally per $VMID..."
+  echo $1 > /sys/module/haltpoll/parameters/guest_halt_poll_ns
+}
+
+exec_set_halt_poll() {
+  echo "Setting halt_poll globally per $VMID..."
   echo $1 > /sys/module/kvm/parameters/halt_poll_ns
 }
 
@@ -164,7 +169,11 @@ exec_cmds() {
         ;;
 
       "#set_halt_poll")
-        if_action post-start exec_set_haltpoll "$ARG1"
+        if_action post-start exec_set_halt_poll "$ARG1"
+        ;;
+
+      "#set_guest_halt_poll")
+        if_action post-start exec_set_guest_halt_poll "$ARG1"
         ;;
 
       "#assign_interrupts")
